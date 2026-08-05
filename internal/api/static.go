@@ -3,11 +3,13 @@ package api
 import (
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
+	"path"
 	"strings"
 )
 
-//go:embed webdist/*
+//go:embed all:webdist
 var webFS embed.FS
 
 func webHandler() http.Handler {
@@ -15,17 +17,36 @@ func webHandler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/")
-		if path == "" {
-			path = "index.html"
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
 		}
-		if _, err := fs.Stat(sub, path); err != nil {
-			r.URL.Path = "/index.html"
-		} else {
-			r.URL.Path = "/" + path
+
+		reqPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if reqPath == "" || reqPath == "." {
+			reqPath = "index.html"
 		}
-		fileServer.ServeHTTP(w, r)
+
+		// SPA fallback: unknown paths serve index.html
+		if _, err := fs.Stat(sub, reqPath); err != nil {
+			reqPath = "index.html"
+		}
+
+		data, err := fs.ReadFile(sub, reqPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		contentType := mime.TypeByExtension(path.Ext(reqPath))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusOK)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(data)
+		}
 	})
 }

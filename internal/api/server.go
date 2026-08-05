@@ -48,7 +48,11 @@ func (s *Server) routes() {
 		r.Get("/scans/{id}", s.handleGetScan)
 		r.Get("/scans/{id}/report", s.handleGetReport)
 	})
-	s.router.Handle("/*", webHandler())
+
+	web := webHandler()
+	s.router.Get("/", web.ServeHTTP)
+	s.router.Handle("/assets/*", web)
+	s.router.NotFound(web.ServeHTTP)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
