@@ -93,11 +93,27 @@ const (
 	ScanFailed    ScanStatus = "failed"
 )
 
+// ScanRecord is a persisted scan with status metadata.
+type ScanRecord struct {
+	ID          string       `json:"id"`
+	Status      ScanStatus   `json:"status"`
+	Provider    Provider     `json:"provider"`
+	StateSource string       `json:"state_source"`
+	CreatedAt   time.Time    `json:"created_at"`
+	StartedAt   *time.Time   `json:"started_at,omitempty"`
+	CompletedAt *time.Time   `json:"completed_at,omitempty"`
+	Error       string       `json:"error,omitempty"`
+	Options     ScanOptions  `json:"options,omitempty"`
+	Report      *DriftReport `json:"report,omitempty"`
+}
+
 // ScanOptions configures a drift scan.
 type ScanOptions struct {
+	StateSource   StateSource
 	StatePath     string
 	Provider      Provider
 	Regions       []string
 	ResourceTypes []string
 	AccountID     string
+	ProjectID     string
 }

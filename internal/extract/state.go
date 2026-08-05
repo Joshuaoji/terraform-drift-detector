@@ -18,6 +18,8 @@ type stateHandler func(ref string, attrs map[string]any) (*models.Resource, erro
 func NewStateExtractor() *StateExtractor {
 	e := &StateExtractor{handlers: map[string]stateHandler{}}
 	e.registerAWSHandlers()
+	e.registerAzureHandlers()
+	e.registerGCPHandlers()
 	return e
 }
 
@@ -74,6 +76,78 @@ func (e *StateExtractor) registerAWSHandlers() {
 			Metadata:     map[string]string{"arn": stringAttr(attrs, "arn")},
 		}, nil
 	}
+}
+
+func (e *StateExtractor) registerAzureHandlers() {
+	e.handlers["azurerm_storage_account"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id", "name")
+		return &models.Resource{
+			ID:           id,
+			Type:         "azurerm_storage_account",
+			Provider:     models.ProviderAzure,
+			Name:         stringAttr(attrs, "name"),
+			Region:       stringAttr(attrs, "location"),
+			Attributes:   pickAttrs(attrs, "name", "account_tier", "account_replication_type", "account_kind"),
+			Tags:         extractTags(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
+
+	e.handlers["azurerm_linux_virtual_machine"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id", "name")
+		return &models.Resource{
+			ID:           id,
+			Type:         "azurerm_linux_virtual_machine",
+			Provider:     models.ProviderAzure,
+			Name:         stringAttr(attrs, "name"),
+			Region:       stringAttr(attrs, "location"),
+			Attributes:   pickAttrs(attrs, "name", "size", "zone"),
+			Tags:         extractTags(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
+}
+
+func (e *StateExtractor) registerGCPHandlers() {
+	e.handlers["google_storage_bucket"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id", "name")
+		return &models.Resource{
+			ID:           id,
+			Type:         "google_storage_bucket",
+			Provider:     models.ProviderGCP,
+			Name:         stringAttr(attrs, "name"),
+			Region:       stringAttr(attrs, "location"),
+			Attributes:   pickAttrs(attrs, "name", "location", "storage_class"),
+			Tags:         extractLabels(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
+
+	e.handlers["google_compute_instance"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id", "name")
+		return &models.Resource{
+			ID:           id,
+			Type:         "google_compute_instance",
+			Provider:     models.ProviderGCP,
+			Name:         stringAttr(attrs, "name"),
+			Region:       stringAttr(attrs, "zone"),
+			Attributes:   pickAttrs(attrs, "name", "machine_type", "zone"),
+			Tags:         extractLabels(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
+}
+
+func extractLabels(attrs map[string]any) map[string]string {
+	labels := map[string]string{}
+	if raw, ok := attrs["labels"].(map[string]any); ok {
+		for k, v := range raw {
+			if s, ok := v.(string); ok {
+				labels[k] = s
+			}
+		}
+	}
+	return labels
 }
 
 func (e *StateExtractor) genericExtract(resourceType, ref string, attrs map[string]any) (*models.Resource, error) {

@@ -30,6 +30,9 @@ go.work.sum
 # Build output
 bin/
 
+# SQLite databases
+*.db
+
 # Editor/IDE
 # .idea/
 # .vscode/
