@@ -13,12 +13,42 @@ scans:
       path: ./testdata/sample.tfstate
     schedule: "0 */6 * * *"
 
-  - name: staging-aws
+  - name: prod-aws-remote
     provider: aws
     regions:
       - us-east-1
     resource_types:
       - aws_s3_bucket
+      - aws_instance
     state:
-      backend: local
-      path: ./testdata/sample.tfstate
+      backend: s3
+      bucket: my-tf-state-bucket
+      key: prod/terraform.tfstate
+
+  - name: prod-gcp
+    provider: gcp
+    project: my-gcp-project
+    regions:
+      - us-central1-a
+    resource_types:
+      - google_storage_bucket
+      - google_compute_instance
+    state:
+      backend: gcs
+      bucket: my-tf-state-bucket
+      prefix: prod/terraform.tfstate
+
+  - name: prod-azure
+    provider: azure
+    account_id: "00000000-0000-0000-0000-000000000000"
+    regions:
+      - eastus
+    resource_types:
+      - azurerm_storage_account
+      - azurerm_linux_virtual_machine
+    state:
+      backend: azure
+      storage_account: mytfstateaccount
+      container: tfstate
+      key: prod.terraform.tfstate
+      resource_group: terraform-rg

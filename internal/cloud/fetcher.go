@@ -11,6 +11,7 @@ type FetchFilter struct {
 	Regions       []string
 	ResourceTypes []string
 	AccountID     string
+	ProjectID     string
 }
 
 // Fetcher retrieves live resources from a cloud provider.

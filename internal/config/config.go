@@ -10,23 +10,26 @@ import (
 
 // StateConfig describes where Terraform state is stored.
 type StateConfig struct {
-	Backend string `yaml:"backend"` // local, s3, gcs, azure
-	Path    string `yaml:"path,omitempty"`
-	Bucket  string `yaml:"bucket,omitempty"`
-	Key     string `yaml:"key,omitempty"`
-	Prefix  string `yaml:"prefix,omitempty"`
+	Backend        string `yaml:"backend"` // local, s3, gcs, azure
+	Path           string `yaml:"path,omitempty"`
+	Bucket         string `yaml:"bucket,omitempty"`
+	Key            string `yaml:"key,omitempty"`
+	Prefix         string `yaml:"prefix,omitempty"`
+	ResourceGroup  string `yaml:"resource_group,omitempty"`
+	StorageAccount string `yaml:"storage_account,omitempty"`
+	Container      string `yaml:"container,omitempty"`
 }
 
 // ScanProfile defines a named scan configuration.
 type ScanProfile struct {
-	Name          string         `yaml:"name"`
+	Name          string          `yaml:"name"`
 	Provider      models.Provider `yaml:"provider"`
-	Regions       []string       `yaml:"regions,omitempty"`
-	ResourceTypes []string       `yaml:"resource_types,omitempty"`
-	State         StateConfig    `yaml:"state"`
-	Schedule      string         `yaml:"schedule,omitempty"`
-	AccountID     string         `yaml:"account_id,omitempty"`
-	Project       string         `yaml:"project,omitempty"`
+	Regions       []string        `yaml:"regions,omitempty"`
+	ResourceTypes []string        `yaml:"resource_types,omitempty"`
+	State         StateConfig     `yaml:"state"`
+	Schedule      string          `yaml:"schedule,omitempty"`
+	AccountID     string          `yaml:"account_id,omitempty"`
+	Project       string          `yaml:"project,omitempty"`
 }
 
 // Config is the root application configuration.
@@ -59,22 +62,37 @@ func (c *Config) FindScan(name string) (*ScanProfile, error) {
 
 // ToScanOptions converts a profile to scan options.
 func (p *ScanProfile) ToScanOptions() models.ScanOptions {
-	statePath := p.State.Path
+	src := models.StateSource{Backend: p.State.Backend}
 	switch p.State.Backend {
 	case "s3":
-		if p.State.Bucket != "" {
-			statePath = fmt.Sprintf("s3://%s/%s", p.State.Bucket, p.State.Key)
-		}
+		src.Bucket = p.State.Bucket
+		src.Key = p.State.Key
+		src.Path = fmt.Sprintf("s3://%s/%s", p.State.Bucket, p.State.Key)
 	case "gcs":
-		if p.State.Bucket != "" {
-			statePath = fmt.Sprintf("gcs://%s/%s", p.State.Bucket, p.State.Prefix)
+		src.Bucket = p.State.Bucket
+		src.Key = p.State.Key
+		if src.Key == "" {
+			src.Key = p.State.Prefix
+			src.Prefix = p.State.Prefix
 		}
+		src.Path = fmt.Sprintf("gcs://%s/%s", p.State.Bucket, src.Key)
+	case "azure", "azurerm":
+		src.StorageAccount = p.State.StorageAccount
+		src.Container = p.State.Container
+		src.Key = p.State.Key
+		src.ResourceGroup = p.State.ResourceGroup
+		src.Path = fmt.Sprintf("azure://%s/%s/%s", p.State.StorageAccount, p.State.Container, p.State.Key)
+	default:
+		src.Backend = "local"
+		src.Path = p.State.Path
 	}
 	return models.ScanOptions{
-		StatePath:     statePath,
+		StateSource:   src,
+		StatePath:     src.Path,
 		Provider:      p.Provider,
 		Regions:       p.Regions,
 		ResourceTypes: p.ResourceTypes,
 		AccountID:     p.AccountID,
+		ProjectID:     p.Project,
 	}
 }

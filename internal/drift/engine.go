@@ -42,6 +42,18 @@ var comparableAttributes = map[string][]string{
 	"aws_iam_role": {
 		"name", "path", "description", "max_session_duration",
 	},
+	"azurerm_storage_account": {
+		"name", "account_tier", "account_replication_type", "account_kind",
+	},
+	"azurerm_linux_virtual_machine": {
+		"name", "size", "zone",
+	},
+	"google_storage_bucket": {
+		"name", "location", "storage_class",
+	},
+	"google_compute_instance": {
+		"name", "machine_type", "zone",
+	},
 }
 
 // Engine compares expected and actual resource sets.
