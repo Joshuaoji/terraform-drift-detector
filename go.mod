@@ -18,6 +18,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/terraform-json v0.28.0
+	github.com/robfig/cron/v3 v3.0.1
 	google.golang.org/api v0.292.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.56.0

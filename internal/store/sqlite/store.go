@@ -143,6 +143,55 @@ func (s *Store) ListScans(ctx context.Context, limit int) ([]models.ScanRecord, 
 	return records, rows.Err()
 }
 
+// ListScanSummaries returns recent scans without full report payloads.
+func (s *Store) ListScanSummaries(ctx context.Context, limit int) ([]models.ScanSummary, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, status, provider, state_source, options_json, error, created_at, started_at, completed_at,
+       COALESCE(CAST(json_extract(report_json, '$.summary.total_drifts') AS INTEGER), 0)
+FROM scans ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []models.ScanSummary
+	for rows.Next() {
+		var summary models.ScanSummary
+		var optsJSON sql.NullString
+		var errMsg sql.NullString
+		var startedAt, completedAt sql.NullString
+		var createdAt string
+
+		if err := rows.Scan(&summary.ID, &summary.Status, &summary.Provider, &summary.StateSource,
+			&optsJSON, &errMsg, &createdAt, &startedAt, &completedAt, &summary.TotalDrifts); err != nil {
+			return nil, err
+		}
+		summary.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		if startedAt.Valid {
+			t, _ := time.Parse(time.RFC3339, startedAt.String)
+			summary.StartedAt = &t
+		}
+		if completedAt.Valid {
+			t, _ := time.Parse(time.RFC3339, completedAt.String)
+			summary.CompletedAt = &t
+		}
+		if errMsg.Valid {
+			summary.Error = errMsg.String
+		}
+		if optsJSON.Valid {
+			var opts models.ScanOptions
+			if err := json.Unmarshal([]byte(optsJSON.String), &opts); err == nil {
+				summary.ProfileName = opts.ProfileName
+			}
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
+}
+
 func scanRow(row *sql.Row) (*models.ScanRecord, error) {
 	var rec models.ScanRecord
 	var optsJSON, reportJSON sql.NullString

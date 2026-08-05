@@ -107,13 +107,38 @@ type ScanRecord struct {
 	Report      *DriftReport `json:"report,omitempty"`
 }
 
+// ScanSummary is a lightweight scan record for list views.
+type ScanSummary struct {
+	ID          string     `json:"id"`
+	Status      ScanStatus `json:"status"`
+	Provider    Provider   `json:"provider"`
+	StateSource string     `json:"state_source"`
+	ProfileName string     `json:"profile_name,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	TotalDrifts int        `json:"total_drifts"`
+}
+
+// ScanProfileInfo describes a configured scan profile.
+type ScanProfileInfo struct {
+	Name          string   `json:"name"`
+	Provider      Provider `json:"provider"`
+	Regions       []string `json:"regions,omitempty"`
+	ResourceTypes []string `json:"resource_types,omitempty"`
+	Schedule      string   `json:"schedule,omitempty"`
+	StateSource   string   `json:"state_source"`
+}
+
 // ScanOptions configures a drift scan.
 type ScanOptions struct {
-	StateSource   StateSource
-	StatePath     string
-	Provider      Provider
-	Regions       []string
-	ResourceTypes []string
-	AccountID     string
-	ProjectID     string
+	StateSource   StateSource `json:"state_source,omitempty"`
+	StatePath     string      `json:"state_path,omitempty"`
+	Provider      Provider    `json:"provider"`
+	Regions       []string    `json:"regions,omitempty"`
+	ResourceTypes []string    `json:"resource_types,omitempty"`
+	AccountID     string      `json:"account_id,omitempty"`
+	ProjectID     string      `json:"project_id,omitempty"`
+	ProfileName   string      `json:"profile_name,omitempty"`
 }
