@@ -42,17 +42,29 @@ var comparableAttributes = map[string][]string{
 	"aws_iam_role": {
 		"name", "path", "description", "max_session_duration",
 	},
+	"aws_vpc": {
+		"cidr_block", "instance_tenancy", "enable_dns_hostnames",
+	},
+	"aws_security_group": {
+		"name", "description", "vpc_id",
+	},
 	"azurerm_storage_account": {
 		"name", "account_tier", "account_replication_type", "account_kind",
 	},
 	"azurerm_linux_virtual_machine": {
 		"name", "size", "zone",
 	},
+	"azurerm_resource_group": {
+		"name", "location",
+	},
 	"google_storage_bucket": {
 		"name", "location", "storage_class",
 	},
 	"google_compute_instance": {
 		"name", "machine_type", "zone",
+	},
+	"google_compute_network": {
+		"name", "auto_create_subnetworks", "routing_mode",
 	},
 }
 

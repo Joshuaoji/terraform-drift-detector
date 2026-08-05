@@ -8,12 +8,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/terraform-drift-detector/driftdetect/internal/auth"
 	"github.com/terraform-drift-detector/driftdetect/internal/config"
+	"github.com/terraform-drift-detector/driftdetect/internal/observability"
 	"github.com/terraform-drift-detector/driftdetect/internal/scan"
 	"github.com/terraform-drift-detector/driftdetect/internal/scheduler"
 	"github.com/terraform-drift-detector/driftdetect/internal/store"
 	"github.com/terraform-drift-detector/driftdetect/pkg/models"
 )
+
+const version = "0.4.0"
+
+// ServerOptions configures the API server.
+type ServerOptions struct {
+	Auth          *auth.Validator
+	DBBackend     string
+	EnableMetrics bool
+}
 
 // Server exposes the drift detection REST API and web dashboard.
 type Server struct {
@@ -21,12 +32,13 @@ type Server struct {
 	store     store.Store
 	scheduler *scheduler.Scheduler
 	config    *config.Config
+	opts      ServerOptions
 	router    chi.Router
 }
 
 // NewServer creates an API server.
-func NewServer(service *scan.Service, st store.Store, sched *scheduler.Scheduler, cfg *config.Config) *Server {
-	s := &Server{service: service, store: st, scheduler: sched, config: cfg}
+func NewServer(service *scan.Service, st store.Store, sched *scheduler.Scheduler, cfg *config.Config, opts ServerOptions) *Server {
+	s := &Server{service: service, store: st, scheduler: sched, config: cfg, opts: opts}
 	s.router = chi.NewRouter()
 	s.router.Use(corsMiddleware, middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer, middleware.Timeout(120*time.Second))
 	s.routes()
@@ -40,7 +52,14 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) routes() {
 	s.router.Get("/health", s.handleHealth)
+	if s.opts.EnableMetrics {
+		s.router.Handle("/metrics", observability.MetricsHandler())
+	}
+
 	s.router.Route("/api/v1", func(r chi.Router) {
+		if s.opts.Auth != nil {
+			r.Use(s.opts.Auth.Middleware)
+		}
 		r.Get("/profiles", s.handleListProfiles)
 		r.Post("/scans", s.handleCreateScan)
 		r.Post("/scans/profile/{name}", s.handleCreateScanFromProfile)
@@ -56,7 +75,18 @@ func (s *Server) routes() {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	status := map[string]string{
+		"status":  "ok",
+		"version": version,
+		"db":      s.opts.DBBackend,
+	}
+	if err := store.Ping(r.Context(), s.store); err != nil {
+		status["status"] = "degraded"
+		status["db_error"] = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, status)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {

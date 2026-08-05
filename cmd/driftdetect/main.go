@@ -4,17 +4,20 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/terraform-drift-detector/driftdetect/internal/api"
+	"github.com/terraform-drift-detector/driftdetect/internal/auth"
 	"github.com/terraform-drift-detector/driftdetect/internal/config"
 	"github.com/terraform-drift-detector/driftdetect/internal/report"
 	"github.com/terraform-drift-detector/driftdetect/internal/scan"
 	"github.com/terraform-drift-detector/driftdetect/internal/scheduler"
-	"github.com/terraform-drift-detector/driftdetect/internal/store/sqlite"
+	"github.com/terraform-drift-detector/driftdetect/internal/store"
+	"github.com/terraform-drift-detector/driftdetect/internal/webhook"
 	"github.com/terraform-drift-detector/driftdetect/pkg/models"
 )
 
@@ -30,7 +33,7 @@ func main() {
 	case "serve":
 		os.Exit(runServe(os.Args[2:]))
 	case "version":
-		fmt.Println("driftdetect v0.3.0")
+		fmt.Println("driftdetect v0.4.0")
 		os.Exit(0)
 	case "help", "-h", "--help":
 		printUsage()
@@ -92,16 +95,28 @@ func runScan(args []string) int {
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.String("port", "8080", "HTTP listen port")
-	dbPath := fs.String("db", "driftdetect.db", "SQLite database path")
+	dbPath := fs.String("db", "driftdetect.db", "SQLite database path (ignored when --db-url is set)")
+	dbURL := fs.String("db-url", "", "Database DSN: file path for SQLite or postgres:// for PostgreSQL")
+	apiKey := fs.String("api-key", "", "API key for /api/v1 routes (repeatable; also set via config or DRIFTDETECT_API_KEYS)")
+	enableMetrics := fs.Bool("metrics", false, "Expose Prometheus metrics at /metrics")
 	configPath := fs.String("config", "", "Path to YAML config with scan profiles and schedules")
 	_ = fs.Parse(args)
 
-	st, err := sqlite.Open(*dbPath)
+	dsn := *dbURL
+	if dsn == "" {
+		dsn = *dbPath
+	}
+	if err := store.ValidateDSN(dsn); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	st, err := store.Open(dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		return 1
 	}
-	defer st.Close()
+	defer store.Close(st)
 
 	var cfg *config.Config
 	if *configPath != "" {
@@ -112,8 +127,22 @@ func runServe(args []string) int {
 		}
 	}
 
+	log := slog.Default()
 	scanner := scan.NewScanner()
-	svc := scan.NewService(scanner, st)
+
+	var svcOpts []scan.ServiceOption
+	svcOpts = append(svcOpts, scan.WithFullStore(st), scan.WithLogger(log))
+
+	if cfg != nil && len(cfg.Webhooks) > 0 {
+		whConfigs := webhookConfigsFromYAML(cfg.Webhooks)
+		if err := webhook.Validate(whConfigs); err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid webhook config: %v\n", err)
+			return 1
+		}
+		svcOpts = append(svcOpts, scan.WithWebhooks(webhook.New(whConfigs, log)))
+	}
+
+	svc := scan.NewService(scanner, st, svcOpts...)
 
 	var sched *scheduler.Scheduler
 	if cfg != nil {
@@ -126,10 +155,26 @@ func runServe(args []string) int {
 		defer sched.Stop()
 	}
 
-	server := api.NewServer(svc, st, sched, cfg)
+	apiKeys := collectAPIKeys(cfg, *apiKey)
+	validator := auth.NewValidator(apiKeys)
+
+	serverOpts := api.ServerOptions{
+		Auth:          validator,
+		DBBackend:     store.BackendName(dsn),
+		EnableMetrics: *enableMetrics,
+	}
+	server := api.NewServer(svc, st, sched, cfg, serverOpts)
+
 	addr := ":" + *port
 	fmt.Printf("driftdetect server listening on %s\n", addr)
 	fmt.Printf("Dashboard: http://localhost%s/\n", addr)
+	fmt.Printf("Database: %s (%s)\n", store.BackendName(dsn), dsn)
+	if validator.Enabled() {
+		fmt.Println("API authentication: enabled")
+	}
+	if *enableMetrics {
+		fmt.Printf("Metrics: http://localhost%s/metrics\n", addr)
+	}
 	if cfg != nil {
 		fmt.Printf("Loaded %d scan profile(s) from %s\n", len(cfg.Scans), *configPath)
 	}
@@ -138,6 +183,33 @@ func runServe(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func collectAPIKeys(cfg *config.Config, cliKeys ...string) []string {
+	var keys []string
+	if cfg != nil {
+		keys = append(keys, cfg.APIKeys()...)
+	}
+	for _, k := range cliKeys {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+func webhookConfigsFromYAML(cfgs []config.WebhookConfig) []webhook.Config {
+	out := make([]webhook.Config, 0, len(cfgs))
+	for _, wh := range cfgs {
+		out = append(out, webhook.Config{
+			Name:   wh.Name,
+			URL:    wh.URL,
+			Events: wh.Events,
+			Secret: wh.Secret,
+		})
+	}
+	return out
 }
 
 func resolveScanOptions(statePath, provider, regions, resourceTypes, configPath, scanName, accountID, projectID string) (models.ScanOptions, error) {
@@ -224,10 +296,14 @@ Scan Flags:
 Serve Flags:
   --port            HTTP listen port [default: 8080]
   --db              SQLite database path [default: driftdetect.db]
-  --config          YAML config with scan profiles and cron schedules
+  --db-url          Database DSN (SQLite file path or postgres:// URL)
+  --api-key         API key for /api/v1 routes (repeatable)
+  --metrics         Expose Prometheus metrics at /metrics
+  --config          YAML config with scan profiles, schedules, webhooks, and API keys
 
 API Endpoints:
   GET  /health
+  GET  /metrics          (when --metrics is set)
   GET  /api/v1/profiles
   POST /api/v1/scans
   POST /api/v1/scans/profile/{name}
@@ -235,13 +311,16 @@ API Endpoints:
   GET  /api/v1/scans/{id}
   GET  /api/v1/scans/{id}/report
 
+Authentication:
+  When API keys are configured, send X-API-Key or Authorization: Bearer <key>
+
 Dashboard:
   Open http://localhost:8080/ when the server is running
 
 Examples:
   driftdetect scan --state ./terraform.tfstate --provider aws --output json
-  driftdetect scan --state s3://my-bucket/terraform.tfstate --provider aws
   driftdetect serve --port 8080 --config configs/example.yaml
+  driftdetect serve --db-url postgres://user:pass@localhost:5432/driftdetect --metrics
 
 Exit Codes (scan):
   0 - No drift detected

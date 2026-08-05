@@ -1,3 +1,15 @@
+server:
+  api_keys:
+    - dev-api-key
+
+webhooks:
+  - name: slack-alerts
+    url: https://hooks.example.com/driftdetect
+    events:
+      - scan.completed
+      - scan.failed
+    secret: change-me
+
 scans:
   - name: prod-aws
     provider: aws
@@ -8,6 +20,8 @@ scans:
       - aws_s3_bucket
       - aws_instance
       - aws_iam_role
+      - aws_vpc
+      - aws_security_group
     state:
       backend: local
       path: ./testdata/sample.tfstate
@@ -33,6 +47,8 @@ scans:
     resource_types:
       - google_storage_bucket
       - google_compute_instance
+      - google_compute_network
+      - google_compute_firewall
     state:
       backend: gcs
       bucket: my-tf-state-bucket
@@ -46,6 +62,7 @@ scans:
     resource_types:
       - azurerm_storage_account
       - azurerm_linux_virtual_machine
+      - azurerm_resource_group
     state:
       backend: azure
       storage_account: mytfstateaccount

@@ -12,6 +12,10 @@ A cloud-agnostic platform that continuously compares Terraform state files again
 - **REST API** — Trigger scans, list history, and retrieve reports
 - **Web dashboard** — View scan history, drift reports, and trigger scans from the browser
 - **Cron scheduler** — Run scan profiles on a schedule from YAML config
+- **PostgreSQL or SQLite** — Production-ready Postgres store with SQLite for local dev
+- **API key authentication** — Protect `/api/v1` routes with `X-API-Key` or Bearer tokens
+- **Webhooks** — HMAC-signed notifications on `scan.completed` and `scan.failed`
+- **Prometheus metrics** — Scan counts, durations, and drift totals at `/metrics`
 - **On-demand scans** — CLI-driven or API-driven scans with configurable resource types and regions
 
 ## Architecture
@@ -29,6 +33,7 @@ Cloud APIs      → Cloud Fetcher → Resource Extractor → Actual Model  ─�
 ### Prerequisites
 
 - Go 1.25+
+- Node.js 22+ (for frontend builds)
 - Cloud credentials for the provider you scan
 
 ### Build
@@ -51,6 +56,14 @@ make build
 
 Open **http://localhost:8080/** for the React dashboard.
 
+### Docker Compose (PostgreSQL)
+
+```bash
+docker compose up --build
+```
+
+This starts PostgreSQL and the API on port 8080 with metrics enabled. The default API key is `dev-api-key` (set via `DRIFTDETECT_API_KEYS`).
+
 ### Frontend development
 
 ```bash
@@ -62,6 +75,12 @@ make dev-web
 ```
 
 Open **http://localhost:5173** — the frontend lives in `web/` and proxies API calls to port 8080.
+
+When API keys are enabled, set `VITE_API_KEY` in `web/.env.local`:
+
+```bash
+VITE_API_KEY=dev-api-key
+```
 
 The scheduler automatically runs any scan profile that defines a `schedule` cron expression in the config file.
 
@@ -103,7 +122,8 @@ Start the server with `--config` to activate scheduled scans. Overlapping runs f
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
+| GET | `/health` | Health check (includes DB status) |
+| GET | `/metrics` | Prometheus metrics (when `--metrics` is set) |
 | GET | `/api/v1/profiles` | List scan profiles from config |
 | POST | `/api/v1/scans` | Trigger a scan (async) |
 | POST | `/api/v1/scans/profile/{name}` | Trigger a named profile |
@@ -111,13 +131,45 @@ Start the server with `--config` to activate scheduled scans. Overlapping runs f
 | GET | `/api/v1/scans/{id}` | Get scan status + report |
 | GET | `/api/v1/scans/{id}/report` | Get drift report |
 
+### Authentication
+
+When API keys are configured (via `server.api_keys` in YAML, `DRIFTDETECT_API_KEYS` env, or `--api-key`), protect API routes with:
+
+```
+X-API-Key: your-key
+```
+
+or
+
+```
+Authorization: Bearer your-key
+```
+
+The dashboard and `/health` remain public.
+
+## Webhooks
+
+Configure outbound webhooks in YAML:
+
+```yaml
+webhooks:
+  - name: alerts
+    url: https://hooks.example.com/driftdetect
+    events:
+      - scan.completed
+      - scan.failed
+    secret: signing-secret
+```
+
+Payloads are signed with `X-Driftdetect-Signature: sha256=<hmac>` when a secret is set.
+
 ## Supported Resources
 
 | Provider | Resource Types |
 |----------|----------------|
-| AWS | `aws_s3_bucket`, `aws_instance`, `aws_iam_role` |
-| Azure | `azurerm_storage_account`, `azurerm_linux_virtual_machine` |
-| GCP | `google_storage_bucket`, `google_compute_instance` |
+| AWS | `aws_s3_bucket`, `aws_instance`, `aws_iam_role`, `aws_vpc`, `aws_security_group` |
+| Azure | `azurerm_storage_account`, `azurerm_linux_virtual_machine`, `azurerm_resource_group` |
+| GCP | `google_storage_bucket`, `google_compute_instance`, `google_compute_network`, `google_compute_firewall` |
 
 ## Remote State Backends
 
@@ -128,6 +180,16 @@ Start the server with `--config` to activate scheduled scans. Overlapping runs f
 | GCS | `gcs://bucket/key` |
 | Azure Blob | `azure://account/container/key` |
 
+## Production Deployment
+
+```bash
+./bin/driftdetect serve \
+  --port 8080 \
+  --db-url postgres://user:pass@host:5432/driftdetect \
+  --config configs/example.yaml \
+  --metrics
+```
+
 ## Development
 
 ```bash
@@ -135,9 +197,7 @@ make test
 make build-all
 ```
 
-## Roadmap
-
-- **Phase 4**: PostgreSQL, auth, webhooks, expanded resource types
+CI runs on every push/PR via GitHub Actions (`.github/workflows/ci.yml`).
 
 ## License
 

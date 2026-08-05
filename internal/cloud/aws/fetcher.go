@@ -11,9 +11,10 @@ import (
 
 // Fetcher retrieves AWS resources via cloud APIs.
 type Fetcher struct {
-	s3Fetcher  *S3Fetcher
-	ec2Fetcher *EC2Fetcher
-	iamFetcher *IAMFetcher
+	s3Fetcher      *S3Fetcher
+	ec2Fetcher     *EC2Fetcher
+	iamFetcher     *IAMFetcher
+	networkFetcher *NetworkFetcher
 }
 
 // NewFetcher creates an AWS cloud fetcher using default credential chain.
@@ -30,10 +31,15 @@ func NewFetcher() (*Fetcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init iam fetcher: %w", err)
 	}
+	netf, err := NewNetworkFetcher()
+	if err != nil {
+		return nil, fmt.Errorf("init network fetcher: %w", err)
+	}
 	return &Fetcher{
-		s3Fetcher:  s3f,
-		ec2Fetcher: ec2f,
-		iamFetcher: iamf,
+		s3Fetcher:      s3f,
+		ec2Fetcher:     ec2f,
+		iamFetcher:     iamf,
+		networkFetcher: netf,
 	}, nil
 }
 
@@ -44,7 +50,7 @@ func (f *Fetcher) Provider() models.Provider {
 
 // SupportedTypes lists resource types this fetcher can retrieve.
 func (f *Fetcher) SupportedTypes() []string {
-	return []string{"aws_s3_bucket", "aws_instance", "aws_iam_role"}
+	return []string{"aws_s3_bucket", "aws_instance", "aws_iam_role", "aws_vpc", "aws_security_group"}
 }
 
 // Fetch retrieves AWS resources matching the filter.
@@ -87,6 +93,8 @@ func (f *Fetcher) Fetch(ctx context.Context, filter cloud.FetchFilter) ([]models
 	fetch(f.s3Fetcher.Fetch, "aws_s3_bucket")
 	fetch(f.ec2Fetcher.Fetch, "aws_instance")
 	fetch(f.iamFetcher.Fetch, "aws_iam_role")
+	fetch(f.networkFetcher.FetchVPCs, "aws_vpc")
+	fetch(f.networkFetcher.FetchSecurityGroups, "aws_security_group")
 
 	wg.Wait()
 

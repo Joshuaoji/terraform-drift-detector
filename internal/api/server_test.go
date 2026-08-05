@@ -20,7 +20,7 @@ func TestWebHandler_ServesIndex(t *testing.T) {
 
 	scanner := scan.NewScanner()
 	svc := scan.NewService(scanner, st)
-	server := api.NewServer(svc, st, nil, nil)
+	server := api.NewServer(svc, st, nil, nil, api.ServerOptions{DBBackend: "sqlite"})
 
 	tests := []struct {
 		path       string

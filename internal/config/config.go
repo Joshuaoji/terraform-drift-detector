@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/terraform-drift-detector/driftdetect/pkg/models"
 	"gopkg.in/yaml.v3"
@@ -34,7 +35,39 @@ type ScanProfile struct {
 
 // Config is the root application configuration.
 type Config struct {
-	Scans []ScanProfile `yaml:"scans"`
+	Server   ServerConfig    `yaml:"server,omitempty"`
+	Scans    []ScanProfile   `yaml:"scans"`
+	Webhooks []WebhookConfig `yaml:"webhooks,omitempty"`
+}
+
+// ServerConfig holds API server settings.
+type ServerConfig struct {
+	APIKeys []string `yaml:"api_keys,omitempty"`
+}
+
+// WebhookConfig defines an outbound webhook.
+type WebhookConfig struct {
+	Name   string   `yaml:"name"`
+	URL    string   `yaml:"url"`
+	Events []string `yaml:"events,omitempty"`
+	Secret string   `yaml:"secret,omitempty"`
+}
+
+// APIKeys returns configured API keys, including DRIFTDETECT_API_KEYS env (comma-separated).
+func (c *Config) APIKeys() []string {
+	var keys []string
+	if c != nil {
+		keys = append(keys, c.Server.APIKeys...)
+	}
+	if env := os.Getenv("DRIFTDETECT_API_KEYS"); env != "" {
+		for _, k := range strings.Split(env, ",") {
+			k = strings.TrimSpace(k)
+			if k != "" {
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
 }
 
 // Load reads configuration from a YAML file.
