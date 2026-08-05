@@ -1,0 +1,24 @@
+scans:
+  - name: prod-aws
+    provider: aws
+    regions:
+      - us-east-1
+      - us-west-2
+    resource_types:
+      - aws_s3_bucket
+      - aws_instance
+      - aws_iam_role
+    state:
+      backend: local
+      path: ./testdata/sample.tfstate
+    schedule: "0 */6 * * *"
+
+  - name: staging-aws
+    provider: aws
+    regions:
+      - us-east-1
+    resource_types:
+      - aws_s3_bucket
+    state:
+      backend: local
+      path: ./testdata/sample.tfstate
