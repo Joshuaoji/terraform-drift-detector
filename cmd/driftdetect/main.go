@@ -13,6 +13,7 @@ import (
 	"github.com/terraform-drift-detector/driftdetect/internal/config"
 	"github.com/terraform-drift-detector/driftdetect/internal/report"
 	"github.com/terraform-drift-detector/driftdetect/internal/scan"
+	"github.com/terraform-drift-detector/driftdetect/internal/scheduler"
 	"github.com/terraform-drift-detector/driftdetect/internal/store/sqlite"
 	"github.com/terraform-drift-detector/driftdetect/pkg/models"
 )
@@ -29,7 +30,7 @@ func main() {
 	case "serve":
 		os.Exit(runServe(os.Args[2:]))
 	case "version":
-		fmt.Println("driftdetect v0.2.0")
+		fmt.Println("driftdetect v0.3.0")
 		os.Exit(0)
 	case "help", "-h", "--help":
 		printUsage()
@@ -92,6 +93,7 @@ func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.String("port", "8080", "HTTP listen port")
 	dbPath := fs.String("db", "driftdetect.db", "SQLite database path")
+	configPath := fs.String("config", "", "Path to YAML config with scan profiles and schedules")
 	_ = fs.Parse(args)
 
 	st, err := sqlite.Open(*dbPath)
@@ -101,10 +103,36 @@ func runServe(args []string) int {
 	}
 	defer st.Close()
 
+	var cfg *config.Config
+	if *configPath != "" {
+		cfg, err = config.Load(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+			return 1
+		}
+	}
+
 	scanner := scan.NewScanner()
-	server := api.NewServer(scanner, st)
+	svc := scan.NewService(scanner, st)
+
+	var sched *scheduler.Scheduler
+	if cfg != nil {
+		sched = scheduler.New(svc)
+		if err := sched.LoadProfiles(cfg.Scans); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load schedules: %v\n", err)
+			return 1
+		}
+		sched.Start()
+		defer sched.Stop()
+	}
+
+	server := api.NewServer(svc, st, sched, cfg)
 	addr := ":" + *port
-	fmt.Printf("driftdetect API listening on %s\n", addr)
+	fmt.Printf("driftdetect server listening on %s\n", addr)
+	fmt.Printf("Dashboard: http://localhost%s/\n", addr)
+	if cfg != nil {
+		fmt.Printf("Loaded %d scan profile(s) from %s\n", len(cfg.Scans), *configPath)
+	}
 	if err := http.ListenAndServe(addr, server.Handler()); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		return 1
@@ -196,18 +224,24 @@ Scan Flags:
 Serve Flags:
   --port            HTTP listen port [default: 8080]
   --db              SQLite database path [default: driftdetect.db]
+  --config          YAML config with scan profiles and cron schedules
 
 API Endpoints:
   GET  /health
+  GET  /api/v1/profiles
   POST /api/v1/scans
-  GET  /api/v1/scans
+  POST /api/v1/scans/profile/{name}
+  GET  /api/v1/scans?summary=true
   GET  /api/v1/scans/{id}
   GET  /api/v1/scans/{id}/report
+
+Dashboard:
+  Open http://localhost:8080/ when the server is running
 
 Examples:
   driftdetect scan --state ./terraform.tfstate --provider aws --output json
   driftdetect scan --state s3://my-bucket/terraform.tfstate --provider aws
-  driftdetect serve --port 8080
+  driftdetect serve --port 8080 --config configs/example.yaml
 
 Exit Codes (scan):
   0 - No drift detected

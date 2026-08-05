@@ -13,4 +13,5 @@ type Store interface {
 	SaveReport(ctx context.Context, report models.DriftReport) error
 	GetScan(ctx context.Context, id string) (*models.ScanRecord, error)
 	ListScans(ctx context.Context, limit int) ([]models.ScanRecord, error)
+	ListScanSummaries(ctx context.Context, limit int) ([]models.ScanSummary, error)
 }
