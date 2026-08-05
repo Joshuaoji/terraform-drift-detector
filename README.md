@@ -34,6 +34,12 @@ Cloud APIs      → Cloud Fetcher → Resource Extractor → Actual Model  ─�
 ### Build
 
 ```bash
+make build-all   # builds React frontend + Go binary
+```
+
+For Go-only builds (without rebuilding the frontend):
+
+```bash
 make build
 ```
 
@@ -43,7 +49,19 @@ make build
 ./bin/driftdetect serve --port 8080 --config configs/example.yaml
 ```
 
-Open **http://localhost:8080/** for the web dashboard.
+Open **http://localhost:8080/** for the React dashboard.
+
+### Frontend development
+
+```bash
+# Terminal 1: API
+./bin/driftdetect serve --port 8080 --config configs/example.yaml
+
+# Terminal 2: Vite dev server (hot reload)
+make dev-web
+```
+
+Open **http://localhost:5173** — the frontend lives in `web/` and proxies API calls to port 8080.
 
 The scheduler automatically runs any scan profile that defines a `schedule` cron expression in the config file.
 
@@ -58,7 +76,7 @@ The scheduler automatically runs any scan profile that defines a `schedule` cron
 
 ## Web Dashboard
 
-The embedded dashboard provides:
+The React dashboard (`web/`) provides:
 
 - **Scan profiles** — View configured profiles and trigger on-demand runs
 - **Scan history** — Status, provider, drift counts, timestamps (auto-refreshes while scans run)
@@ -114,7 +132,7 @@ Start the server with `--config` to activate scheduled scans. Overlapping runs f
 
 ```bash
 make test
-make build
+make build-all
 ```
 
 ## Roadmap

@@ -33,6 +33,12 @@ bin/
 # SQLite databases
 *.db
 
+# Frontend
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+internal/api/webdist/assets/
+
 # Editor/IDE
 # .idea/
 # .vscode/
