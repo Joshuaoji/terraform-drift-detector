@@ -104,7 +104,11 @@ func runServe(args []string) int {
 
 	dsn := *dbURL
 	if dsn == "" {
-		dsn = *dbPath
+		if env := os.Getenv("DATABASE_URL"); env != "" {
+			dsn = env
+		} else {
+			dsn = *dbPath
+		}
 	}
 	if err := store.ValidateDSN(dsn); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -300,6 +304,10 @@ Serve Flags:
   --api-key         API key for /api/v1 routes (repeatable)
   --metrics         Expose Prometheus metrics at /metrics
   --config          YAML config with scan profiles, schedules, webhooks, and API keys
+
+Environment:
+  DATABASE_URL      Postgres DSN (used when --db-url is not set)
+  DRIFTDETECT_API_KEYS  Comma-separated API keys
 
 API Endpoints:
   GET  /health

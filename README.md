@@ -199,6 +199,32 @@ Payloads are signed with `X-Driftdetect-Signature: sha256=<hmac>` when a secret 
 
 ## Production Deployment
 
+### Docker Compose (local / single host)
+
+```bash
+docker compose up --build
+```
+
+### AWS EKS (Helm + GitHub Actions CD)
+
+The repo includes:
+
+- `charts/driftdetect/` — Helm chart for Kubernetes
+- `.github/workflows/cd.yaml` — build image → push to ECR → deploy to EKS
+
+See [charts/driftdetect/README.md](charts/driftdetect/README.md) for full setup (RDS, IRSA, ALB ingress, secrets).
+
+```bash
+# Manual Helm deploy
+helm upgrade --install driftdetect ./charts/driftdetect \
+  --namespace driftdetect --create-namespace \
+  -f charts/driftdetect/values-eks.example.yaml \
+  --set image.repository=<account>.dkr.ecr.<region>.amazonaws.com/driftdetect \
+  --set image.tag=<tag>
+```
+
+Required GitHub Actions variables for CD: `AWS_REGION`, `ECR_REPOSITORY`, `EKS_CLUSTER_NAME`, `AWS_ROLE_ARN`.
+
 ```bash
 ./bin/driftdetect serve \
   --port 8080 \
