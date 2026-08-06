@@ -32,9 +32,26 @@ Cloud APIs      → Cloud Fetcher → Resource Extractor → Actual Model  ─�
 
 ### Prerequisites
 
-- Go 1.25+
-- Node.js 22+ (for frontend builds)
+- **Go 1.25+** — required to build the backend (`make build` / `make build-all`)
+- **Node.js 22+** — required to build the frontend (`make build-web`)
 - Cloud credentials for the provider you scan
+
+#### Install Go
+
+If `make build-all` fails with `go: command not found`, install Go and ensure it is on your `PATH`:
+
+```bash
+# Verify (should print go version go1.25.x or newer)
+go version
+```
+
+| Platform | Install |
+|----------|---------|
+| macOS (Homebrew) | `brew install go` |
+| Linux | Download from [go.dev/dl](https://go.dev/dl/) or your distro package manager |
+| Windows | Download installer from [go.dev/dl](https://go.dev/dl/) |
+
+After installing, open a **new terminal** so your shell picks up the updated `PATH`.
 
 ### Build
 
