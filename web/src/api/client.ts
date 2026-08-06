@@ -2,10 +2,19 @@ import type { CreateScanRequest, ScanProfileInfo, ScanRecord, ScanSummary } from
 
 const API = '/api/v1'
 
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const apiKey = import.meta.env.VITE_API_KEY
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey
+  }
+  return headers
+}
+
 async function fetchJSON<T>(url: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...opts,
+    headers: { ...authHeaders(), ...opts.headers },
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

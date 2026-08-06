@@ -1,4 +1,4 @@
-package sqlite
+package postgres
 
 import (
 	"context"
@@ -9,20 +9,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/terraform-drift-detector/driftdetect/pkg/models"
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Store is a SQLite-backed scan store.
+// Store is a PostgreSQL-backed scan store.
 type Store struct {
 	db *sql.DB
 }
 
-// Open opens or creates a SQLite database at the given path.
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+// Open opens a PostgreSQL connection using a DSN.
+func Open(dsn string) (*Store, error) {
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite db: %w", err)
+		return nil, fmt.Errorf("open postgres: %w", err)
 	}
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		db.Close()
@@ -43,12 +47,12 @@ CREATE TABLE IF NOT EXISTS scans (
     status TEXT NOT NULL,
     provider TEXT NOT NULL,
     state_source TEXT NOT NULL,
-    options_json TEXT NOT NULL,
-    report_json TEXT,
+    options_json JSONB NOT NULL,
+    report_json JSONB,
     error TEXT,
-    created_at TEXT NOT NULL,
-    started_at TEXT,
-    completed_at TEXT
+    created_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_scans_created_at ON scans(created_at DESC);
 `
@@ -66,8 +70,8 @@ func (s *Store) CreateScan(ctx context.Context, opts models.ScanOptions) (*model
 	stateSource := opts.ResolvedStateSource().Display()
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO scans (id, status, provider, state_source, options_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, models.ScanPending, opts.Provider, stateSource, string(optsJSON), now.Format(time.RFC3339),
+		`INSERT INTO scans (id, status, provider, state_source, options_json, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		id, models.ScanPending, opts.Provider, stateSource, optsJSON, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert scan: %w", err)
@@ -84,22 +88,22 @@ func (s *Store) CreateScan(ctx context.Context, opts models.ScanOptions) (*model
 
 // UpdateStatus updates scan lifecycle status.
 func (s *Store) UpdateStatus(ctx context.Context, id string, status models.ScanStatus, errMsg string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
 	switch status {
 	case models.ScanRunning:
 		_, err := s.db.ExecContext(ctx,
-			`UPDATE scans SET status = ?, started_at = ?, error = '' WHERE id = ?`,
+			`UPDATE scans SET status = $1, started_at = $2, error = '' WHERE id = $3`,
 			status, now, id,
 		)
 		return err
 	case models.ScanCompleted, models.ScanFailed:
 		_, err := s.db.ExecContext(ctx,
-			`UPDATE scans SET status = ?, completed_at = ?, error = ? WHERE id = ?`,
+			`UPDATE scans SET status = $1, completed_at = $2, error = $3 WHERE id = $4`,
 			status, now, errMsg, id,
 		)
 		return err
 	default:
-		_, err := s.db.ExecContext(ctx, `UPDATE scans SET status = ? WHERE id = ?`, status, id)
+		_, err := s.db.ExecContext(ctx, `UPDATE scans SET status = $1 WHERE id = $2`, status, id)
 		return err
 	}
 }
@@ -110,14 +114,14 @@ func (s *Store) SaveReport(ctx context.Context, report models.DriftReport) error
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE scans SET report_json = ? WHERE id = ?`, string(data), report.ScanID)
+	_, err = s.db.ExecContext(ctx, `UPDATE scans SET report_json = $1 WHERE id = $2`, data, report.ScanID)
 	return err
 }
 
 // GetScan retrieves a scan by ID.
 func (s *Store) GetScan(ctx context.Context, id string) (*models.ScanRecord, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, status, provider, state_source, options_json, report_json, error, created_at, started_at, completed_at FROM scans WHERE id = ?`,
+		`SELECT id, status, provider, state_source, options_json, report_json, error, created_at, started_at, completed_at FROM scans WHERE id = $1`,
 		id,
 	)
 	return scanRow(row)
@@ -129,23 +133,14 @@ func (s *Store) ListScans(ctx context.Context, limit int) ([]models.ScanRecord, 
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, status, provider, state_source, options_json, report_json, error, created_at, started_at, completed_at FROM scans ORDER BY created_at DESC LIMIT ?`,
+		`SELECT id, status, provider, state_source, options_json, report_json, error, created_at, started_at, completed_at FROM scans ORDER BY created_at DESC LIMIT $1`,
 		limit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var records []models.ScanRecord
-	for rows.Next() {
-		rec, err := scanRows(rows)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, *rec)
-	}
-	return records, rows.Err()
+	return scanRows(rows)
 }
 
 // ListScanSummaries returns recent scans without full report payloads.
@@ -155,8 +150,8 @@ func (s *Store) ListScanSummaries(ctx context.Context, limit int) ([]models.Scan
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, status, provider, state_source, options_json, error, created_at, started_at, completed_at,
-       COALESCE(CAST(json_extract(report_json, '$.summary.total_drifts') AS INTEGER), 0)
-FROM scans ORDER BY created_at DESC LIMIT ?`, limit)
+       COALESCE((report_json->'summary'->>'total_drifts')::int, 0)
+FROM scans ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -165,30 +160,28 @@ FROM scans ORDER BY created_at DESC LIMIT ?`, limit)
 	var summaries []models.ScanSummary
 	for rows.Next() {
 		var summary models.ScanSummary
-		var optsJSON sql.NullString
+		var optsJSON []byte
 		var errMsg sql.NullString
-		var startedAt, completedAt sql.NullString
-		var createdAt string
+		var startedAt, completedAt sql.NullTime
 
 		if err := rows.Scan(&summary.ID, &summary.Status, &summary.Provider, &summary.StateSource,
-			&optsJSON, &errMsg, &createdAt, &startedAt, &completedAt, &summary.TotalDrifts); err != nil {
+			&optsJSON, &errMsg, &summary.CreatedAt, &startedAt, &completedAt, &summary.TotalDrifts); err != nil {
 			return nil, err
 		}
-		summary.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if startedAt.Valid {
-			t, _ := time.Parse(time.RFC3339, startedAt.String)
+			t := startedAt.Time
 			summary.StartedAt = &t
 		}
 		if completedAt.Valid {
-			t, _ := time.Parse(time.RFC3339, completedAt.String)
+			t := completedAt.Time
 			summary.CompletedAt = &t
 		}
 		if errMsg.Valid {
 			summary.Error = errMsg.String
 		}
-		if optsJSON.Valid {
+		if len(optsJSON) > 0 {
 			var opts models.ScanOptions
-			if err := json.Unmarshal([]byte(optsJSON.String), &opts); err == nil {
+			if err := json.Unmarshal(optsJSON, &opts); err == nil {
 				summary.ProfileName = opts.ProfileName
 			}
 		}
@@ -199,76 +192,71 @@ FROM scans ORDER BY created_at DESC LIMIT ?`, limit)
 
 func scanRow(row *sql.Row) (*models.ScanRecord, error) {
 	var rec models.ScanRecord
-	var optsJSON, reportJSON sql.NullString
+	var optsJSON, reportJSON []byte
 	var errMsg sql.NullString
-	var startedAt, completedAt sql.NullString
-	var createdAt string
+	var startedAt, completedAt sql.NullTime
 
-	err := row.Scan(&rec.ID, &rec.Status, &rec.Provider, &rec.StateSource, &optsJSON, &reportJSON, &errMsg, &createdAt, &startedAt, &completedAt)
+	err := row.Scan(&rec.ID, &rec.Status, &rec.Provider, &rec.StateSource, &optsJSON, &reportJSON, &errMsg, &rec.CreatedAt, &startedAt, &completedAt)
 	if err != nil {
 		return nil, err
 	}
-	rec.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	if startedAt.Valid {
-		t, _ := time.Parse(time.RFC3339, startedAt.String)
+		t := startedAt.Time
 		rec.StartedAt = &t
 	}
 	if completedAt.Valid {
-		t, _ := time.Parse(time.RFC3339, completedAt.String)
+		t := completedAt.Time
 		rec.CompletedAt = &t
 	}
 	if errMsg.Valid {
 		rec.Error = errMsg.String
 	}
-	if optsJSON.Valid {
-		_ = json.Unmarshal([]byte(optsJSON.String), &rec.Options)
+	if len(optsJSON) > 0 {
+		_ = json.Unmarshal(optsJSON, &rec.Options)
 	}
-	if reportJSON.Valid && reportJSON.String != "" {
+	if len(reportJSON) > 0 {
 		var report models.DriftReport
-		if err := json.Unmarshal([]byte(reportJSON.String), &report); err == nil {
+		if err := json.Unmarshal(reportJSON, &report); err == nil {
 			rec.Report = &report
 		}
 	}
 	return &rec, nil
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
+func scanRows(rows *sql.Rows) ([]models.ScanRecord, error) {
+	var records []models.ScanRecord
+	for rows.Next() {
+		var rec models.ScanRecord
+		var optsJSON, reportJSON []byte
+		var errMsg sql.NullString
+		var startedAt, completedAt sql.NullTime
 
-func scanRows(rows *sql.Rows) (*models.ScanRecord, error) {
-	var rec models.ScanRecord
-	var optsJSON, reportJSON sql.NullString
-	var errMsg sql.NullString
-	var startedAt, completedAt sql.NullString
-	var createdAt string
-
-	err := rows.Scan(&rec.ID, &rec.Status, &rec.Provider, &rec.StateSource, &optsJSON, &reportJSON, &errMsg, &createdAt, &startedAt, &completedAt)
-	if err != nil {
-		return nil, err
-	}
-	rec.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	if startedAt.Valid {
-		t, _ := time.Parse(time.RFC3339, startedAt.String)
-		rec.StartedAt = &t
-	}
-	if completedAt.Valid {
-		t, _ := time.Parse(time.RFC3339, completedAt.String)
-		rec.CompletedAt = &t
-	}
-	if errMsg.Valid {
-		rec.Error = errMsg.String
-	}
-	if optsJSON.Valid {
-		_ = json.Unmarshal([]byte(optsJSON.String), &rec.Options)
-	}
-	if reportJSON.Valid && reportJSON.String != "" {
-		var report models.DriftReport
-		if err := json.Unmarshal([]byte(reportJSON.String), &report); err == nil {
-			rec.Report = &report
+		if err := rows.Scan(&rec.ID, &rec.Status, &rec.Provider, &rec.StateSource, &optsJSON, &reportJSON, &errMsg, &rec.CreatedAt, &startedAt, &completedAt); err != nil {
+			return nil, err
 		}
+		if startedAt.Valid {
+			t := startedAt.Time
+			rec.StartedAt = &t
+		}
+		if completedAt.Valid {
+			t := completedAt.Time
+			rec.CompletedAt = &t
+		}
+		if errMsg.Valid {
+			rec.Error = errMsg.String
+		}
+		if len(optsJSON) > 0 {
+			_ = json.Unmarshal(optsJSON, &rec.Options)
+		}
+		if len(reportJSON) > 0 {
+			var report models.DriftReport
+			if err := json.Unmarshal(reportJSON, &report); err == nil {
+				rec.Report = &report
+			}
+		}
+		records = append(records, rec)
 	}
-	return &rec, nil
+	return records, rows.Err()
 }
 
 // Close closes the database connection.

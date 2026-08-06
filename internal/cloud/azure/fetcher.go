@@ -11,8 +11,9 @@ import (
 
 // Fetcher retrieves Azure resources via cloud APIs.
 type Fetcher struct {
-	storage *StorageFetcher
-	compute *ComputeFetcher
+	storage       *StorageFetcher
+	compute       *ComputeFetcher
+	resourceGroup *ResourceGroupFetcher
 }
 
 // NewFetcher creates an Azure cloud fetcher.
@@ -25,7 +26,11 @@ func NewFetcher() (*Fetcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init compute fetcher: %w", err)
 	}
-	return &Fetcher{storage: storage, compute: compute}, nil
+	rg, err := NewResourceGroupFetcher()
+	if err != nil {
+		return nil, fmt.Errorf("init resource group fetcher: %w", err)
+	}
+	return &Fetcher{storage: storage, compute: compute, resourceGroup: rg}, nil
 }
 
 // Provider returns the Azure provider identifier.
@@ -35,7 +40,7 @@ func (f *Fetcher) Provider() models.Provider {
 
 // SupportedTypes lists resource types this fetcher can retrieve.
 func (f *Fetcher) SupportedTypes() []string {
-	return []string{"azurerm_storage_account", "azurerm_linux_virtual_machine"}
+	return []string{"azurerm_storage_account", "azurerm_linux_virtual_machine", "azurerm_resource_group"}
 }
 
 // Fetch retrieves Azure resources matching the filter.
@@ -76,6 +81,7 @@ func (f *Fetcher) Fetch(ctx context.Context, filter cloud.FetchFilter) ([]models
 
 	fetch(f.storage.Fetch, "azurerm_storage_account")
 	fetch(f.compute.Fetch, "azurerm_linux_virtual_machine")
+	fetch(f.resourceGroup.Fetch, "azurerm_resource_group")
 
 	wg.Wait()
 	if len(errs) > 0 {

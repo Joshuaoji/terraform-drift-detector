@@ -76,6 +76,34 @@ func (e *StateExtractor) registerAWSHandlers() {
 			Metadata:     map[string]string{"arn": stringAttr(attrs, "arn")},
 		}, nil
 	}
+
+	e.handlers["aws_vpc"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id")
+		return &models.Resource{
+			ID:           id,
+			Type:         "aws_vpc",
+			Provider:     models.ProviderAWS,
+			Name:         stringAttr(attrs, "tags", "Name"),
+			Region:       stringAttr(attrs, "region"),
+			Attributes:   pickAttrs(attrs, "cidr_block", "instance_tenancy", "enable_dns_hostnames"),
+			Tags:         extractTags(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
+
+	e.handlers["aws_security_group"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id")
+		return &models.Resource{
+			ID:           id,
+			Type:         "aws_security_group",
+			Provider:     models.ProviderAWS,
+			Name:         stringAttr(attrs, "name"),
+			Region:       stringAttr(attrs, "region"),
+			Attributes:   pickAttrs(attrs, "name", "description", "vpc_id"),
+			Tags:         extractTags(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
 }
 
 func (e *StateExtractor) registerAzureHandlers() {
@@ -106,6 +134,20 @@ func (e *StateExtractor) registerAzureHandlers() {
 			TerraformRef: ref,
 		}, nil
 	}
+
+	e.handlers["azurerm_resource_group"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id", "name")
+		return &models.Resource{
+			ID:           id,
+			Type:         "azurerm_resource_group",
+			Provider:     models.ProviderAzure,
+			Name:         stringAttr(attrs, "name"),
+			Region:       stringAttr(attrs, "location"),
+			Attributes:   pickAttrs(attrs, "name", "location"),
+			Tags:         extractTags(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
 }
 
 func (e *StateExtractor) registerGCPHandlers() {
@@ -132,6 +174,20 @@ func (e *StateExtractor) registerGCPHandlers() {
 			Name:         stringAttr(attrs, "name"),
 			Region:       stringAttr(attrs, "zone"),
 			Attributes:   pickAttrs(attrs, "name", "machine_type", "zone"),
+			Tags:         extractLabels(attrs),
+			TerraformRef: ref,
+		}, nil
+	}
+
+	e.handlers["google_compute_network"] = func(ref string, attrs map[string]any) (*models.Resource, error) {
+		id := stringAttr(attrs, "id", "name")
+		return &models.Resource{
+			ID:           id,
+			Type:         "google_compute_network",
+			Provider:     models.ProviderGCP,
+			Name:         stringAttr(attrs, "name"),
+			Region:       "global",
+			Attributes:   pickAttrs(attrs, "name", "auto_create_subnetworks", "routing_mode"),
 			Tags:         extractLabels(attrs),
 			TerraformRef: ref,
 		}, nil

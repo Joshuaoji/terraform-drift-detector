@@ -13,6 +13,7 @@ import (
 type Fetcher struct {
 	storage *StorageFetcher
 	compute *ComputeFetcher
+	network *NetworkFetcher
 }
 
 // NewFetcher creates a GCP cloud fetcher.
@@ -25,7 +26,11 @@ func NewFetcher() (*Fetcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init compute fetcher: %w", err)
 	}
-	return &Fetcher{storage: storage, compute: compute}, nil
+	network, err := NewNetworkFetcher()
+	if err != nil {
+		return nil, fmt.Errorf("init network fetcher: %w", err)
+	}
+	return &Fetcher{storage: storage, compute: compute, network: network}, nil
 }
 
 // Provider returns the GCP provider identifier.
@@ -35,7 +40,7 @@ func (f *Fetcher) Provider() models.Provider {
 
 // SupportedTypes lists resource types this fetcher can retrieve.
 func (f *Fetcher) SupportedTypes() []string {
-	return []string{"google_storage_bucket", "google_compute_instance"}
+	return []string{"google_storage_bucket", "google_compute_instance", "google_compute_network"}
 }
 
 // Fetch retrieves GCP resources matching the filter.
@@ -76,6 +81,7 @@ func (f *Fetcher) Fetch(ctx context.Context, filter cloud.FetchFilter) ([]models
 
 	fetch(f.storage.Fetch, "google_storage_bucket")
 	fetch(f.compute.Fetch, "google_compute_instance")
+	fetch(f.network.Fetch, "google_compute_network")
 
 	wg.Wait()
 	if len(errs) > 0 {

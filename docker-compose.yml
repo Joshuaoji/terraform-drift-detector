@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: driftdetect
+      POSTGRES_PASSWORD: driftdetect
+      POSTGRES_DB: driftdetect
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U driftdetect"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  driftdetect:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DRIFTDETECT_API_KEYS: ${DRIFTDETECT_API_KEYS:-dev-api-key}
+    command:
+      - serve
+      - --port=8080
+      - --db-url=postgres://driftdetect:driftdetect@postgres:5432/driftdetect?sslmode=disable
+      - --config=/app/configs/example.yaml
+      - --metrics
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./testdata:/app/testdata:ro
+
+volumes:
+  pgdata:
