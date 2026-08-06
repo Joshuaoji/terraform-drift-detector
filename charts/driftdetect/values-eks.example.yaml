@@ -1,0 +1,80 @@
+# Example values for deploying driftdetect to AWS EKS.
+# Copy to values-eks.yaml and customize before deploying.
+
+replicaCount: 2
+
+image:
+  repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/driftdetect
+  tag: "" # set by CD pipeline (git sha)
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  annotations:
+    # IRSA role for reading Terraform state from S3 / cloud APIs
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/driftdetect-irsa
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+  hosts:
+    - host: driftdetect.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+app:
+  metrics: true
+
+# Use Amazon RDS in production (recommended).
+database:
+  url: "" # leave empty when using existingSecret
+  existingSecret: driftdetect-database
+  existingSecretKey: database-url
+
+apiKeys:
+  existingSecret: driftdetect-api-keys
+  existingSecretKey: api-keys
+
+config:
+  server:
+    api_keys: [] # keys loaded from secret above via DRIFTDETECT_API_KEYS
+  webhooks: []
+  scans:
+    - name: prod-aws
+      provider: aws
+      regions:
+        - us-east-1
+      resource_types:
+        - aws_s3_bucket
+        - aws_instance
+        - aws_iam_role
+      state:
+        backend: s3
+        bucket: my-tf-state-bucket
+        key: prod/terraform.tfstate
+      schedule: "0 */6 * * *"
+
+env:
+  - name: AWS_REGION
+    value: us-east-1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 75
+
+postgresql:
+  enabled: false
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack

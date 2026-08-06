@@ -1,0 +1,24 @@
+{{- if not .Values.config.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "driftdetect.configMapName" . }}
+  labels:
+    {{- include "driftdetect.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- with .Values.config.server }}
+    server:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.config.webhooks }}
+    webhooks:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    scans:
+      {{- if .Values.config.scans }}
+      {{- toYaml .Values.config.scans | nindent 6 }}
+      {{- else }}
+      []
+      {{- end }}
+{{- end }}

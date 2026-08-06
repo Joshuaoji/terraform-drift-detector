@@ -1,0 +1,150 @@
+# Default values for driftdetect.
+# Deploy to EKS with: helm upgrade --install driftdetect ./charts/driftdetect -f my-values.yaml
+
+replicaCount: 2
+
+image:
+  repository: "" # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/driftdetect
+  tag: ""        # defaults to Chart.appVersion when empty
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/driftdetect-irsa
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/...
+    # alb.ingress.kubernetes.io/ssl-redirect: "443"
+  hosts:
+    - host: driftdetect.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Application flags passed to `driftdetect serve`
+app:
+  port: 8080
+  metrics: true
+  configPath: /app/config/config.yaml
+
+# Scan profiles and server settings (rendered into a ConfigMap).
+# Override this block per environment or set config.existingConfigMap.
+config:
+  existingConfigMap: ""
+  server:
+    api_keys: []
+  webhooks: []
+  scans: []
+
+# Database connection (PostgreSQL / RDS recommended for production).
+database:
+  # Full DSN, e.g. postgres://user:pass@host:5432/driftdetect?sslmode=require
+  url: ""
+  existingSecret: ""
+  existingSecretKey: database-url
+
+# API keys (comma-separated in secret value).
+apiKeys:
+  existingSecret: ""
+  existingSecretKey: api-keys
+
+# Extra environment variables
+env: []
+# - name: AWS_REGION
+#   value: us-east-1
+
+extraEnvFrom: []
+# - secretRef:
+#     name: driftdetect-cloud-credentials
+
+# Optional in-cluster PostgreSQL for non-production environments.
+# For production EKS, use Amazon RDS and leave this disabled.
+postgresql:
+  enabled: false
+  image: postgres:16-alpine
+  auth:
+    username: driftdetect
+    password: driftdetect
+    database: driftdetect
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
